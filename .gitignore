@@ -5,5 +5,11 @@
 /.envrc
 /.direnv
 
+# editorconfig
+/.editorconfig
+
 # rust
 /target
+
+# lamuda
+/.lamuda_history
