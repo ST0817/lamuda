@@ -1,5 +1,11 @@
+mod check;
+mod context;
 mod eval;
+mod object;
 mod parse;
+mod syntax;
+mod term;
+mod typ;
 
 use std::process::ExitCode;
 
@@ -7,7 +13,10 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-use crate::eval::eval;
+use crate::{
+    check::{TypeContext, check_syntax},
+    eval::{ObjectContext, eval_term},
+};
 
 pub type Error<'src> = Rich<'src, char>;
 pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
@@ -15,10 +24,15 @@ pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
 const HISTORY_FILE_NAME: &str = ".lamuda_history";
 const REPL_ID: &str = "REPL";
 
-fn repl_process<'src>(input: &'src str) -> Result<'src, ()> {
+fn repl_process<'src>(
+    input: &'src str,
+    type_context: &TypeContext,
+    object_context: &ObjectContext,
+) -> Result<'src, ()> {
     let term = parse::syntax().parse(input).into_result()?;
-    let object = eval(&term);
-    println!("{object}");
+    let (term, typ) = check_syntax(&term, type_context)?;
+    let object = eval_term(&term, object_context);
+    println!("{object} : {typ}");
     Ok(())
 }
 
@@ -45,13 +59,16 @@ fn main() -> ExitCode {
         println!("no previous history")
     }
 
+    let type_context = TypeContext::new();
+    let object_context = ObjectContext::new();
+
     loop {
         match editor.readline("❯ ") {
             Ok(input) if input.is_empty() => {}
             Ok(input) => {
                 editor.add_history_entry(&input).unwrap();
 
-                if let Err(errors) = repl_process(&input) {
+                if let Err(errors) = repl_process(&input, &type_context, &object_context) {
                     report_errors(&errors, REPL_ID, &input);
                 }
             }
