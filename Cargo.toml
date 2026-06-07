@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 ariadne = "0.6.0"
 chumsky = "0.13.0"
+ignorable = "0.1.4"
 rustyline = { version = "18.0.0", features = ["derive"] }

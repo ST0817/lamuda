@@ -1,11 +1,8 @@
 mod check;
 mod context;
-mod eval;
-mod object;
 mod parse;
 mod syntax;
 mod term;
-mod typ;
 
 use std::process::ExitCode;
 
@@ -13,10 +10,7 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-use crate::{
-    check::{TypeContext, check_syntax},
-    eval::{ObjectContext, eval_term},
-};
+use crate::{check::check_syntax, context::Context, term::normalize};
 
 pub type Error<'src> = Rich<'src, char>;
 pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
@@ -24,15 +18,12 @@ pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
 const HISTORY_FILE_NAME: &str = ".lamuda_history";
 const REPL_ID: &str = "REPL";
 
-fn repl_process<'src>(
-    input: &'src str,
-    type_context: &TypeContext,
-    object_context: &ObjectContext,
-) -> Result<'src, ()> {
-    let term = parse::syntax().parse(input).into_result()?;
-    let (term, typ) = check_syntax(&term, type_context)?;
-    let object = eval_term(&term, object_context);
-    println!("{object} : {typ}");
+fn repl_process<'src>(input: &'src str, context: &Context) -> Result<'src, ()> {
+    let syntax = parse::syntax().parse(input).into_result()?;
+    let (term, typ) = check_syntax(&syntax, context)?;
+    let norm_term = normalize(&term);
+    println!("{norm_term}");
+    println!(": {typ}");
     Ok(())
 }
 
@@ -59,8 +50,7 @@ fn main() -> ExitCode {
         println!("no previous history")
     }
 
-    let type_context = TypeContext::new();
-    let object_context = ObjectContext::new();
+    let context = Context::new();
 
     loop {
         match editor.readline("❯ ") {
@@ -68,7 +58,7 @@ fn main() -> ExitCode {
             Ok(input) => {
                 editor.add_history_entry(&input).unwrap();
 
-                if let Err(errors) = repl_process(&input, &type_context, &object_context) {
+                if let Err(errors) = repl_process(&input, &context) {
                     report_errors(&errors, REPL_ID, &input);
                 }
             }

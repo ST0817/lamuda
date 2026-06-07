@@ -138,11 +138,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignorable"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77004198f639a008a2b257a39bd7daec149afe5f00003c064948d4a75dc46be7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "lamuda"
 version = "0.1.0"
 dependencies = [
  "ariadne",
  "chumsky",
+ "ignorable",
  "rustyline",
 ]
 

@@ -6,7 +6,7 @@ use chumsky::{
     text::{self, ascii::keyword},
 };
 
-use crate::{Error, syntax::Syntax, typ::Type};
+use crate::{Error, syntax::Syntax};
 
 fn parens<'src, T>(
     parser: impl Parser<'src, &'src str, T, Err<Error<'src>>> + Clone,
@@ -14,7 +14,7 @@ fn parens<'src, T>(
     parser.delimited_by(just('(').padded(), just(')'))
 }
 
-fn int<'src>() -> impl Parser<'src, &'src str, i32, Err<Error<'src>>> + Clone {
+fn nat<'src>() -> impl Parser<'src, &'src str, usize, Err<Error<'src>>> + Clone {
     text::int(10).from_str().unwrapped()
 }
 
@@ -34,47 +34,43 @@ fn name<'src>() -> impl Parser<'src, &'src str, &'src str, Err<Error<'src>>> + C
         .to_slice()
 }
 
-// Tyoe
-
-fn int_type<'src>() -> impl Parser<'src, &'src str, Type, Err<Error<'src>>> + Clone {
-    keyword("Int").map(|_| Type::Int)
-}
-
-fn unit_type<'src>() -> impl Parser<'src, &'src str, Type, Err<Error<'src>>> + Clone {
-    keyword("Unit").map(|_| Type::Unit)
-}
-
-fn fun_type<'src>(
-    typ: impl Parser<'src, &'src str, Type, Err<Error<'src>>> + Clone,
-) -> impl Parser<'src, &'src str, Type, Err<Error<'src>>> + Clone {
-    typ.clone()
-        .padded()
-        .then_ignore(just("->"))
-        .padded()
-        .repeated()
-        .foldr(typ, |param_type, body_type| Type::Fun {
-            param_type: Box::new(param_type),
-            body_type: Box::new(body_type),
-        })
-}
-
-fn typ<'src>() -> impl Parser<'src, &'src str, Type, Err<Error<'src>>> + Clone {
-    let mut typ = Recursive::declare();
-    typ.define({
-        let atom = choice((int_type(), parens(typ.clone()), unit_type()));
-        fun_type(atom)
-    });
-    typ
-}
-
 // Syntax
 
-fn int_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
-    int().map(|value| Syntax::Int { value })
+fn nat_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    nat().map(|value| Syntax::Nat { value })
+}
+
+fn sort_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    keyword("Sort")
+        .padded()
+        .ignore_then(nat())
+        .map(|level| Syntax::Sort { level })
+}
+
+fn prop_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    keyword("Prop").map(|_| Syntax::Sort { level: 0 })
+}
+
+fn type_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    keyword("Type")
+        .padded()
+        .ignore_then(nat().or_not())
+        .map(|level| Syntax::Sort {
+            level: level.unwrap_or_default() + 1,
+        })
 }
 
 fn unit_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
     keyword("unit").map(|_| Syntax::Unit)
+}
+
+fn unit_type_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone
+{
+    keyword("Unit").map(|_| Syntax::UnitType)
+}
+
+fn nat_type_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    keyword("Nat").map(|_| Syntax::NatType)
 }
 
 fn fun_syntax<'src>(
@@ -86,7 +82,7 @@ fn fun_syntax<'src>(
         .padded()
         .then_ignore(just(':'))
         .padded()
-        .then(typ())
+        .then(syntax.clone().map(Box::new).spanned())
         .padded()
         .then_ignore(just("=>"))
         .padded()
@@ -96,6 +92,37 @@ fn fun_syntax<'src>(
             param_type,
             body,
         })
+}
+
+fn prod_syntax<'src>(
+    syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
+) -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    let named_param = parens(
+        name()
+            .padded()
+            .then_ignore(just(':'))
+            .padded()
+            .then(syntax.clone().spanned()),
+    );
+    let no_name_param = syntax.clone().spanned().map(|param_type| ("", param_type));
+    let param = choice((named_param, no_name_param));
+    param
+        .spanned()
+        .padded()
+        .then_ignore(just("->"))
+        .padded()
+        .repeated()
+        .foldr(syntax.spanned(), |param, body_type| {
+            let (param_name, param_type) = param.inner;
+            let span: SimpleSpan = (param.span.start..body_type.span.end).into();
+            Syntax::Prod {
+                param_name,
+                param_type: Box::new(param_type.inner).with_span(param_type.span),
+                body_type: Box::new(body_type.inner).with_span(body_type.span),
+            }
+            .with_span(span)
+        })
+        .map(|spanned| spanned.inner)
 }
 
 fn var_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
@@ -124,13 +151,19 @@ pub fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'s
     let mut syntax = Recursive::declare();
     syntax.define({
         let atom = choice((
-            int_syntax(),
+            nat_syntax(),
             parens(syntax.clone()),
+            sort_syntax(),
+            prop_syntax(),
+            type_syntax(),
             unit_syntax(),
+            unit_type_syntax(),
+            nat_type_syntax(),
             fun_syntax(syntax.clone()),
             var_syntax(),
         ));
-        app_syntax(atom)
+        let app = app_syntax(atom);
+        prod_syntax(app)
     });
     syntax
 }

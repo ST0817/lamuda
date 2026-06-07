@@ -1,16 +1,25 @@
 use chumsky::span::Spanned;
 
-use crate::typ::Type;
-
+#[derive(Debug)]
 pub enum Syntax<'src> {
-    Unit,
-    Int {
-        value: i32,
+    Sort {
+        level: usize,
     },
+    Unit,
+    UnitType,
+    Nat {
+        value: usize,
+    },
+    NatType,
     Fun {
         param_name: &'src str,
-        param_type: Type,
+        param_type: Spanned<Box<Self>>,
         body: Box<Self>,
+    },
+    Prod {
+        param_name: &'src str,
+        param_type: Spanned<Box<Self>>,
+        body_type: Spanned<Box<Self>>,
     },
     Var {
         name: Spanned<&'src str>,
