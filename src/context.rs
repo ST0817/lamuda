@@ -1,10 +1,17 @@
-use std::{ops::Index, rc::Rc};
+use std::rc::Rc;
 
 use crate::term::Term;
 
 #[derive(Clone, Debug)]
+pub struct Entry {
+    pub name: String,
+    pub typ: Rc<Term>,
+    pub value: Option<Rc<Term>>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Context {
-    map: Vec<(String, Rc<Term>)>,
+    map: Vec<Entry>,
 }
 
 impl Context {
@@ -12,33 +19,26 @@ impl Context {
         Self { map: Vec::new() }
     }
 
-    pub fn insert(&mut self, name: &str, term: Rc<Term>) {
-        self.map.push((name.to_string(), term));
+    fn get(&self, predicate: impl FnMut(&(usize, &Entry)) -> bool) -> Option<(usize, &Entry)> {
+        self.map.iter().rev().enumerate().find(predicate)
     }
 
-    pub fn get(&self, name: &str) -> Option<(usize, &Rc<Term>)> {
-        self.map
-            .iter()
-            .rev()
-            .enumerate()
-            .find(|(_, (var_name, _))| var_name == name)
-            .map(|(index, (_, term))| (index, term))
+    pub fn get_name(&self, name: &str) -> Option<(usize, &Entry)> {
+        self.get(|(_, entry)| entry.name == name)
     }
-}
 
-impl Context {
-    pub fn extend(&self, name: &str, term: Rc<Term>) -> Self {
+    pub fn get_index(&self, index: usize) -> Option<&Entry> {
+        self.get(|(var_index, _)| *var_index == index)
+            .map(|(_, entry)| entry)
+    }
+
+    pub fn push(&mut self, entry: Entry) {
+        self.map.push(entry);
+    }
+
+    pub fn extend(&self, entry: Entry) -> Self {
         let mut new_context = self.clone();
-        new_context.insert(name, term);
+        new_context.push(entry);
         new_context
-    }
-}
-
-impl Index<usize> for Context {
-    type Output = Rc<Term>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        let (_, value) = &self.map[self.map.len() - 1 - index];
-        value
     }
 }

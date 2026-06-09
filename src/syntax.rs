@@ -28,4 +28,9 @@ pub enum Syntax<'src> {
         callee: Spanned<Box<Self>>,
         arg: Spanned<Box<Self>>,
     },
+    Let {
+        name: &'src str,
+        value: Box<Self>,
+        body: Box<Self>,
+    },
 }

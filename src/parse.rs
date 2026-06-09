@@ -6,7 +6,7 @@ use chumsky::{
     text::{self, ascii::keyword},
 };
 
-use crate::{Error, syntax::Syntax};
+use crate::{Error, repl_cmd::ReplCmd, syntax::Syntax};
 
 fn parens<'src, T>(
     parser: impl Parser<'src, &'src str, T, Err<Error<'src>>> + Clone,
@@ -147,23 +147,63 @@ fn app_syntax<'src>(
         .map(|spanned| spanned.inner)
 }
 
-pub fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+fn let_syntax<'src>(
+    syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
+) -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
+    keyword("let")
+        .padded()
+        .ignore_then(name())
+        .padded()
+        .then_ignore(just(":="))
+        .padded()
+        .then(syntax.clone().map(Box::new))
+        .padded()
+        .then_ignore(just(';'))
+        .padded()
+        .then(syntax.map(Box::new))
+        .map(|((name, value), body)| Syntax::Let { name, value, body })
+}
+
+fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
     let mut syntax = Recursive::declare();
     syntax.define({
         let atom = choice((
             nat_syntax(),
             parens(syntax.clone()),
-            sort_syntax(),
             prop_syntax(),
+            sort_syntax(),
             type_syntax(),
             unit_syntax(),
             unit_type_syntax(),
             nat_type_syntax(),
             fun_syntax(syntax.clone()),
+            let_syntax(syntax.clone()),
             var_syntax(),
         ));
         let app = app_syntax(atom);
         prod_syntax(app)
     });
     syntax
+}
+
+fn def_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone {
+    just(':')
+        .padded()
+        .ignore_then(keyword("def"))
+        .padded()
+        .ignore_then(name())
+        .padded()
+        .then_ignore(just(":="))
+        .padded()
+        .then(syntax())
+        .map(|(name, syntax)| ReplCmd::Def { name, syntax })
+}
+
+fn syntax_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone
+{
+    syntax().map(|syntax| ReplCmd::Syntax { syntax })
+}
+
+pub fn repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone {
+    choice((def_repl_cmd(), syntax_repl_cmd()))
 }

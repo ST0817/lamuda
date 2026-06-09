@@ -1,6 +1,7 @@
 mod check;
 mod context;
 mod parse;
+mod repl_cmd;
 mod syntax;
 mod term;
 
@@ -10,7 +11,12 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-use crate::{check::check_syntax, context::Context, term::normalize};
+use crate::{
+    check::{check_def, check_syntax},
+    context::Context,
+    repl_cmd::ReplCmd,
+    term::normalize,
+};
 
 pub type Error<'src> = Rich<'src, char>;
 pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
@@ -18,12 +24,16 @@ pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
 const HISTORY_FILE_NAME: &str = ".lamuda_history";
 const REPL_ID: &str = "REPL";
 
-fn repl_process<'src>(input: &'src str, context: &Context) -> Result<'src, ()> {
-    let syntax = parse::syntax().parse(input).into_result()?;
-    let (term, typ) = check_syntax(&syntax, context)?;
-    let norm_term = normalize(&term);
-    println!("{norm_term}");
-    println!(": {typ}");
+fn repl_process<'src>(input: &'src str, context: &mut Context) -> Result<'src, ()> {
+    match parse::repl_cmd().parse(input).into_result()? {
+        ReplCmd::Def { name, syntax } => check_def(name, &syntax, context)?,
+        ReplCmd::Syntax { syntax } => {
+            let (term, typ) = check_syntax(&syntax, context)?;
+            let norm_term = normalize(&term, context);
+            println!("{norm_term}");
+            println!(": {typ}");
+        }
+    }
     Ok(())
 }
 
@@ -50,7 +60,7 @@ fn main() -> ExitCode {
         println!("no previous history")
     }
 
-    let context = Context::new();
+    let mut context = Context::new();
 
     loop {
         match editor.readline("❯ ") {
@@ -58,17 +68,15 @@ fn main() -> ExitCode {
             Ok(input) => {
                 editor.add_history_entry(&input).unwrap();
 
-                if let Err(errors) = repl_process(&input, &context) {
+                if let Err(errors) = repl_process(&input, &mut context) {
                     report_errors(&errors, REPL_ID, &input);
                 }
-            }
-            Err(ReadlineError::Eof) => {
+
                 editor.append_history(HISTORY_FILE_NAME).unwrap();
-                break ExitCode::SUCCESS;
             }
+            Err(ReadlineError::Eof) => break ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("Error: {error}");
-                editor.append_history(HISTORY_FILE_NAME).unwrap();
                 break ExitCode::FAILURE;
             }
         }
