@@ -1,11 +1,6 @@
-use crate::syntax::Syntax;
+use crate::syntax::{Command, Syntax};
 
 pub enum ReplCmd<'src> {
-    Def {
-        name: &'src str,
-        value: Syntax<'src>,
-    },
-    Syntax {
-        syntax: Syntax<'src>,
-    },
+    Command { command: Command<'src> },
+    Syntax { syntax: Syntax<'src> },
 }

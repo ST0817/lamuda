@@ -13,7 +13,7 @@ use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 use crate::{
-    check::{check_def, check_syntax},
+    check::{check_command, check_syntax},
     context::Context,
     env::Env,
     repl_cmd::ReplCmd,
@@ -28,7 +28,7 @@ const REPL_ID: &str = "REPL";
 
 fn repl_process<'src>(input: &'src str, context: &mut Context, env: &mut Env) -> Result<'src, ()> {
     match parse::repl_cmd().parse(input).into_result()? {
-        ReplCmd::Def { name, value } => check_def(name, &value, context, env)?,
+        ReplCmd::Command { command } => check_command(&command, context, env)?,
         ReplCmd::Syntax { syntax } => {
             let (term, typ) = check_syntax(&syntax, context, env)?;
             let norm_term = normalize(&term, env);

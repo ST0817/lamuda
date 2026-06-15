@@ -34,3 +34,14 @@ pub enum Syntax<'src> {
         body: Box<Self>,
     },
 }
+
+pub enum Command<'src> {
+    Def {
+        name: &'src str,
+        value: Syntax<'src>,
+    },
+    Inductive {
+        name: &'src str,
+        typ: Spanned<Syntax<'src>>,
+    },
+}

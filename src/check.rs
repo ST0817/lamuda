@@ -6,7 +6,7 @@ use crate::{
     Error, Result,
     context::{Context, Entry},
     env::Env,
-    syntax::Syntax,
+    syntax::{Command, Syntax},
     term::{Term, normalize, shift},
 };
 
@@ -140,17 +140,29 @@ pub fn check_syntax<'src>(
     }
 }
 
-pub fn check_def<'src>(
-    name: &str,
-    syntax: &Syntax<'src>,
+pub fn check_command<'src>(
+    command: &Command<'src>,
     context: &mut Context,
     env: &mut Env,
 ) -> Result<'src, ()> {
-    let (term, ty) = check_syntax(syntax, context, env)?;
-    context.push(Entry {
-        name: Rc::new(name.to_string()),
-        typ: ty,
-    });
-    env.push(Some(term));
+    match command {
+        Command::Def { name, value } => {
+            let (value_term, value_type) = check_syntax(value, context, env)?;
+            context.push(Entry {
+                name: Rc::new(name.to_string()),
+                typ: value_type,
+            });
+            env.push(Some(value_term));
+        }
+        Command::Inductive { name, typ } => {
+            let (type_term, type_sort) = check_syntax(typ, context, env)?;
+            check_sort(&type_sort, &typ.span)?;
+            context.push(Entry {
+                name: Rc::new(name.to_string()),
+                typ: type_term,
+            });
+            env.push(None);
+        }
+    }
     Ok(())
 }

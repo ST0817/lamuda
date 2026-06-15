@@ -6,7 +6,11 @@ use chumsky::{
     text::{self, ascii::keyword},
 };
 
-use crate::{Error, repl_cmd::ReplCmd, syntax::Syntax};
+use crate::{
+    Error,
+    repl_cmd::ReplCmd,
+    syntax::{Command, Syntax},
+};
 
 fn parens<'src, T>(
     parser: impl Parser<'src, &'src str, T, Err<Error<'src>>> + Clone,
@@ -230,10 +234,8 @@ fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>
     syntax
 }
 
-fn def_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone {
-    just(':')
-        .padded()
-        .ignore_then(keyword("def"))
+fn def_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone {
+    keyword("def")
         .padded()
         .ignore_then(name())
         .padded()
@@ -242,10 +244,44 @@ fn def_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error
         .then_ignore(just(":="))
         .padded()
         .then(syntax())
-        .map(|((name, params), value)| ReplCmd::Def {
+        .map(|((name, params), value)| Command::Def {
             name,
             value: desugar_fun_params(params, value),
         })
+}
+
+fn inductive_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone
+{
+    keyword("inductive")
+        .padded()
+        .ignore_then(name())
+        .padded()
+        .then(
+            param(syntax())
+                .spanned()
+                .padded()
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .padded()
+        .then_ignore(just(':'))
+        .padded()
+        .then(syntax().spanned())
+        .map(|((name, params), typ)| Command::Inductive {
+            name,
+            typ: params
+                .into_iter()
+                .rfold(typ, |typ, param| desugar_prod_param(param, typ)),
+        })
+}
+
+fn command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone {
+    choice((def_command(), inductive_command()))
+}
+
+fn command_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone
+{
+    command().map(|command| ReplCmd::Command { command })
 }
 
 fn syntax_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone
@@ -254,5 +290,5 @@ fn syntax_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Er
 }
 
 pub fn repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone {
-    choice((def_repl_cmd(), syntax_repl_cmd()))
+    choice((command_repl_cmd(), syntax_repl_cmd()))
 }
