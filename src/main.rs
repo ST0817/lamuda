@@ -1,5 +1,6 @@
 mod check;
 mod context;
+mod env;
 mod parse;
 mod repl_cmd;
 mod syntax;
@@ -14,6 +15,7 @@ use rustyline::{DefaultEditor, error::ReadlineError};
 use crate::{
     check::{check_def, check_syntax},
     context::Context,
+    env::Env,
     repl_cmd::ReplCmd,
     term::normalize,
 };
@@ -24,12 +26,12 @@ pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
 const HISTORY_FILE_NAME: &str = ".lamuda_history";
 const REPL_ID: &str = "REPL";
 
-fn repl_process<'src>(input: &'src str, context: &mut Context) -> Result<'src, ()> {
+fn repl_process<'src>(input: &'src str, context: &mut Context, env: &mut Env) -> Result<'src, ()> {
     match parse::repl_cmd().parse(input).into_result()? {
-        ReplCmd::Def { name, syntax } => check_def(name, &syntax, context)?,
+        ReplCmd::Def { name, syntax } => check_def(name, &syntax, context, env)?,
         ReplCmd::Syntax { syntax } => {
-            let (term, typ) = check_syntax(&syntax, context)?;
-            let norm_term = normalize(&term, context);
+            let (term, typ) = check_syntax(&syntax, context, env)?;
+            let norm_term = normalize(&term, env);
             println!("{norm_term}");
             println!(": {typ}");
         }
@@ -61,6 +63,7 @@ fn main() -> ExitCode {
     }
 
     let mut context = Context::new();
+    let mut env = Env::new();
 
     loop {
         match editor.readline("❯ ") {
@@ -68,7 +71,7 @@ fn main() -> ExitCode {
             Ok(input) => {
                 editor.add_history_entry(&input).unwrap();
 
-                if let Err(errors) = repl_process(&input, &mut context) {
+                if let Err(errors) = repl_process(&input, &mut context, &mut env) {
                     report_errors(&errors, REPL_ID, &input);
                 }
 

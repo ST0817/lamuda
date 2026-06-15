@@ -5,7 +5,7 @@ use std::{
 
 use ignorable::PartialEq;
 
-use crate::context::Context;
+use crate::env::Env;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
@@ -38,6 +38,12 @@ pub enum Term {
     App {
         callee: Rc<Self>,
         arg: Rc<Self>,
+    },
+    Let {
+        #[ignored(PartialEq)]
+        name: Rc<String>,
+        value: Rc<Self>,
+        body: Rc<Self>,
     },
 }
 
@@ -81,6 +87,7 @@ impl Display for Term {
                     _ => write!(f, "{arg}"),
                 }
             }
+            Self::Let { name, value, body } => write!(f, "let {name} := {value}; {body}"),
         }
     }
 }
@@ -117,83 +124,55 @@ pub fn shift(term: &Rc<Term>, value: isize, cutoff: usize) -> Rc<Term> {
     }
 }
 
-pub fn subst_at(term1: &Rc<Term>, term2: &Rc<Term>, depth: usize) -> Rc<Term> {
-    match term1.as_ref() {
-        Term::Var { index, .. } if *index == depth => shift(term2, depth as isize, 0),
-        Term::Var { index, name } if *index > depth => Rc::new(Term::Var {
-            index: index - 1,
-            name: name.clone(),
-        }),
-        Term::Fun {
-            param_name,
-            param_type,
-            body,
-        } => Rc::new(Term::Fun {
-            param_name: param_name.clone(),
-            param_type: subst_at(param_type, term2, depth),
-            body: subst_at(body, term2, depth + 1),
-        }),
-        Term::Prod {
-            param_name,
-            param_type,
-            body_type,
-        } => Rc::new(Term::Prod {
-            param_name: param_name.clone(),
-            param_type: subst_at(param_type, term2, depth),
-            body_type: subst_at(body_type, term2, depth + 1),
-        }),
-        Term::App { callee, arg } => Rc::new(Term::App {
-            callee: subst_at(callee, term2, depth),
-            arg: subst_at(arg, term2, depth),
-        }),
-        _ => term1.clone(),
-    }
-}
-
-pub fn subst(term1: &Rc<Term>, term2: &Rc<Term>) -> Rc<Term> {
-    subst_at(term1, term2, 0)
-}
-
-pub fn normalize(term: &Rc<Term>, context: &Context) -> Rc<Term> {
+pub fn normalize(term: &Rc<Term>, env: &Env) -> Rc<Term> {
     match term.as_ref() {
-        Term::Var { index, .. } => context
-            .get_index(*index)
-            .and_then(|entry| {
-                Some(normalize(
-                    &shift(entry.value.as_ref()?, *index as isize + 1, 0),
-                    context,
-                ))
-            })
-            .unwrap_or_else(|| term.clone()),
+        Term::Var { index, .. } if let Some(value) = &env[*index] => {
+            shift(value, *index as isize + 1, 0)
+        }
         Term::Fun {
             param_name,
             param_type,
             body,
-        } => Rc::new(Term::Fun {
-            param_name: param_name.clone(),
-            param_type: normalize(param_type, context),
-            body: normalize(body, context),
-        }),
+        } => {
+            let norm_param_type = normalize(param_type, env);
+            let new_env = env.extend(None);
+            Rc::new(Term::Fun {
+                param_name: param_name.clone(),
+                param_type: norm_param_type,
+                body: normalize(body, &new_env),
+            })
+        }
         Term::Prod {
             param_name,
             param_type,
             body_type,
-        } => Rc::new(Term::Prod {
-            param_name: param_name.clone(),
-            param_type: normalize(param_type, context),
-            body_type: normalize(body_type, context),
-        }),
+        } => {
+            let norm_param_type = normalize(param_type, env);
+            let new_env = env.extend(None);
+            Rc::new(Term::Prod {
+                param_name: param_name.clone(),
+                param_type: norm_param_type,
+                body_type: normalize(body_type, &new_env),
+            })
+        }
         Term::App { callee, arg } => {
-            let evaluated_callee = normalize(callee, context);
-            match evaluated_callee.as_ref() {
+            let norm_callee = normalize(callee, env);
+            let norm_arg = normalize(arg, env);
+            match norm_callee.as_ref() {
                 Term::Fun { body, .. } => {
-                    normalize(&subst(body, &normalize(arg, context)), context)
+                    let new_env = env.extend(Some(norm_arg));
+                    shift(&normalize(body, &new_env), -1, 0)
                 }
                 _ => Rc::new(Term::App {
-                    callee: evaluated_callee.clone(),
-                    arg: normalize(arg, context),
+                    callee: norm_callee.clone(),
+                    arg: norm_arg,
                 }),
             }
+        }
+        Term::Let { value, body, .. } => {
+            let norm_value = normalize(value, env);
+            let new_env = env.extend(Some(norm_value));
+            normalize(body, &new_env)
         }
         _ => term.clone(),
     }

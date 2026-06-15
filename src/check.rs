@@ -5,8 +5,9 @@ use chumsky::span::SimpleSpan;
 use crate::{
     Error, Result,
     context::{Context, Entry},
+    env::Env,
     syntax::Syntax,
-    term::{Term, normalize, shift, subst},
+    term::{Term, normalize, shift},
 };
 
 fn check_sort<'src>(typ: &Term, span: &SimpleSpan) -> Result<'src, usize> {
@@ -19,6 +20,7 @@ fn check_sort<'src>(typ: &Term, span: &SimpleSpan) -> Result<'src, usize> {
 pub fn check_syntax<'src>(
     syntax: &Syntax<'src>,
     context: &Context,
+    env: &Env,
 ) -> Result<'src, (Rc<Term>, Rc<Term>)> {
     match syntax {
         Syntax::Sort { level } => Ok((
@@ -34,21 +36,22 @@ pub fn check_syntax<'src>(
             param_type,
             body,
         } => {
-            let (param_type_term, param_type_sort) = check_syntax(param_type, context)?;
+            let (param_type_term, param_type_sort) = check_syntax(param_type, context, env)?;
             check_sort(&param_type_sort, &param_type.span)?;
+            let param_name = Rc::new(param_name.to_string());
             let new_context = context.extend(Entry {
-                name: param_name.to_string(),
+                name: param_name.clone(),
                 typ: param_type_term.clone(),
-                value: None,
             });
-            let (body_term, body_type) = check_syntax(body, &new_context)?;
+            let new_env = env.extend(None);
+            let (body_term, body_type) = check_syntax(body, &new_context, &new_env)?;
             let fun_term = Term::Fun {
-                param_name: Rc::new(param_name.to_string()),
+                param_name: param_name.clone(),
                 param_type: param_type_term.clone(),
                 body: body_term,
             };
             let fun_type = Term::Prod {
-                param_name: Rc::new(param_name.to_string()),
+                param_name: param_name.clone(),
                 param_type: param_type_term,
                 body_type: body_type,
             };
@@ -59,17 +62,18 @@ pub fn check_syntax<'src>(
             param_type,
             body_type,
         } => {
-            let (param_type_term, param_type_sort) = check_syntax(param_type, context)?;
+            let (param_type_term, param_type_sort) = check_syntax(param_type, context, env)?;
             let param_type_sort_level = check_sort(&param_type_sort, &param_type.span)?;
+            let param_name = Rc::new(param_name.to_string());
             let new_context = context.extend(Entry {
-                name: param_name.to_string(),
+                name: param_name.clone(),
                 typ: param_type_term.clone(),
-                value: None,
             });
-            let (body_type_term, body_type_sort) = check_syntax(body_type, &new_context)?;
+            let new_env = env.extend(None);
+            let (body_type_term, body_type_sort) = check_syntax(body_type, &new_context, &new_env)?;
             let body_type_sort_level = check_sort(&body_type_sort, &body_type.span)?;
             let prod_term = Term::Prod {
-                param_name: Rc::new(param_name.to_string()),
+                param_name,
                 param_type: param_type_term,
                 body_type: body_type_term,
             };
@@ -78,20 +82,20 @@ pub fn check_syntax<'src>(
             };
             Ok((Rc::new(prod_term), Rc::new(prod_type)))
         }
-        Syntax::Var { name } => context
-            .get_name(name)
-            .map(|(index, entry)| {
-                let var_term = Term::Var {
-                    index,
-                    name: Rc::new(name.to_string()),
-                };
-                let var_type = shift(&entry.typ, index as isize + 1, 0);
-                (Rc::new(var_term), var_type)
-            })
-            .ok_or_else(|| vec![Error::custom(name.span, "unbound variable")]),
+        Syntax::Var { name } => {
+            let Some((index, entry)) = context.get(name) else {
+                return Err(vec![Error::custom(name.span, "unbound variable")]);
+            };
+            let var_term = Term::Var {
+                index,
+                name: entry.name.clone(),
+            };
+            let var_type = shift(&entry.typ, index as isize + 1, 0);
+            Ok((Rc::new(var_term), var_type))
+        }
         Syntax::App { callee, arg } => {
-            let (callee_term, callee_type) = check_syntax(callee, context)?;
-            let norm_callee_type = normalize(&callee_type, context);
+            let (callee_term, callee_type) = check_syntax(callee, context, env)?;
+            let norm_callee_type = normalize(&callee_type, env);
             let Term::Prod {
                 param_type,
                 body_type,
@@ -100,9 +104,9 @@ pub fn check_syntax<'src>(
             else {
                 return Err(vec![Error::custom(callee.span, "not a function")]);
             };
-            let (arg_term, arg_type) = check_syntax(arg, context)?;
+            let (arg_term, arg_type) = check_syntax(arg, context, env)?;
 
-            if normalize(&arg_type, context) != normalize(&param_type, context) {
+            if normalize(&arg_type, env) != normalize(&param_type, env) {
                 return Err(vec![Error::custom(
                     arg.span,
                     format!("type mismatch: {arg_type} and {param_type}"),
@@ -113,19 +117,25 @@ pub fn check_syntax<'src>(
                 callee: callee_term,
                 arg: arg_term.clone(),
             };
-            Ok((Rc::new(app_term), subst(body_type, &arg_term)))
+            let new_env = env.extend(Some(arg_term));
+            let norm_body_type = shift(&normalize(body_type, &new_env), -1, 0);
+            Ok((Rc::new(app_term), norm_body_type))
         }
         Syntax::Let { name, value, body } => {
-            let (value_term, value_type) = check_syntax(value, context)?;
+            let (value_term, value_type) = check_syntax(value, context, env)?;
+            let name = Rc::new(name.to_string());
             let new_context = context.extend(Entry {
-                name: name.to_string(),
+                name: name.clone(),
                 typ: value_type,
-                value: Some(value_term.clone()),
             });
-            let (body_term, body_type) = check_syntax(body, &new_context)?;
-            let body_type = subst(&body_type, &value_term);
-            let body_term = subst(&body_term, &value_term);
-            Ok((body_term, body_type))
+            let new_env = env.extend(Some(value_term.clone()));
+            let (body_term, body_type) = check_syntax(body, &new_context, &new_env)?;
+            let let_term = Term::Let {
+                name,
+                value: value_term,
+                body: body_term,
+            };
+            Ok((Rc::new(let_term), body_type))
         }
     }
 }
@@ -134,12 +144,13 @@ pub fn check_def<'src>(
     name: &str,
     syntax: &Syntax<'src>,
     context: &mut Context,
+    env: &mut Env,
 ) -> Result<'src, ()> {
-    let (term, ty) = check_syntax(syntax, context)?;
+    let (term, ty) = check_syntax(syntax, context, env)?;
     context.push(Entry {
-        name: name.to_string(),
+        name: Rc::new(name.to_string()),
         typ: ty,
-        value: Some(term),
     });
+    env.push(Some(term));
     Ok(())
 }
