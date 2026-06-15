@@ -2,7 +2,7 @@ use chumsky::{
     IterParser, Parser,
     extra::Err,
     prelude::{Recursive, any, choice, just},
-    span::{SimpleSpan, SpanWrap},
+    span::{SimpleSpan, SpanWrap, Spanned},
     text::{self, ascii::keyword},
 };
 
@@ -73,55 +73,93 @@ fn nat_type_syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Err
     keyword("Nat").map(|_| Syntax::NatType)
 }
 
+struct Param<'src> {
+    names: Vec<&'src str>,
+    typ: Spanned<Box<Syntax<'src>>>,
+}
+
+impl<'src> Param<'src> {
+    fn no_name(typ: Spanned<Box<Syntax<'src>>>) -> Self {
+        Self {
+            names: vec![""],
+            typ,
+        }
+    }
+}
+
+fn param<'src>(
+    syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
+) -> impl Parser<'src, &'src str, Param<'src>, Err<Error<'src>>> + Clone {
+    let param_inner = name()
+        .padded()
+        .repeated()
+        .at_least(1)
+        .collect()
+        .padded()
+        .then_ignore(just(':'))
+        .padded()
+        .then(syntax.map(Box::new).spanned())
+        .map(|(names, typ)| Param { names, typ });
+    parens(param_inner)
+}
+
+fn params<'src>(
+    syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
+    at_least: usize,
+) -> impl Parser<'src, &'src str, Vec<Param<'src>>, Err<Error<'src>>> + Clone {
+    param(syntax).repeated().at_least(at_least).collect()
+}
+
+fn desugar_fun_params<'src>(params: Vec<Param<'src>>, body: Syntax<'src>) -> Syntax<'src> {
+    params.iter().rfold(body, |body, param| {
+        param.names.iter().rfold(body, |body, name| Syntax::Fun {
+            param_name: name,
+            param_type: param.typ.clone(),
+            body: Box::new(body),
+        })
+    })
+}
+
+fn desugar_prod_param<'src>(
+    param: Spanned<Param<'src>>,
+    body_type: Spanned<Syntax<'src>>,
+) -> Spanned<Syntax<'src>> {
+    param.names.iter().rfold(body_type, |body_type, name| {
+        let span: SimpleSpan = (param.span.start..body_type.span.end).into();
+        Syntax::Prod {
+            param_name: name,
+            param_type: param.typ.clone(),
+            body_type: Box::new(body_type.inner).with_span(body_type.span),
+        }
+        .with_span(span)
+    })
+}
+
 fn fun_syntax<'src>(
     syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
 ) -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
     keyword("fun")
         .padded()
-        .ignore_then(name())
-        .padded()
-        .then_ignore(just(':'))
-        .padded()
-        .then(syntax.clone().map(Box::new).spanned())
+        .ignore_then(params(syntax.clone(), 1))
         .padded()
         .then_ignore(just("=>"))
         .padded()
-        .then(syntax.map(Box::new))
-        .map(|((param_name, param_type), body)| Syntax::Fun {
-            param_name,
-            param_type,
-            body,
-        })
+        .then(syntax)
+        .map(|(params, body)| desugar_fun_params(params, body))
 }
 
 fn prod_syntax<'src>(
     syntax: impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone,
 ) -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
-    let named_param = parens(
-        name()
-            .padded()
-            .then_ignore(just(':'))
-            .padded()
-            .then(syntax.clone().spanned()),
-    );
-    let no_name_param = syntax.clone().spanned().map(|param_type| ("", param_type));
-    let param = choice((named_param, no_name_param));
+    let no_name_param = syntax.clone().map(Box::new).spanned().map(Param::no_name);
+    let param = choice((param(syntax.clone()), no_name_param));
     param
         .spanned()
         .padded()
         .then_ignore(just("->"))
         .padded()
         .repeated()
-        .foldr(syntax.spanned(), |param, body_type| {
-            let (param_name, param_type) = param.inner;
-            let span: SimpleSpan = (param.span.start..body_type.span.end).into();
-            Syntax::Prod {
-                param_name,
-                param_type: Box::new(param_type.inner).with_span(param_type.span),
-                body_type: Box::new(body_type.inner).with_span(body_type.span),
-            }
-            .with_span(span)
-        })
+        .foldr(syntax.spanned(), desugar_prod_param)
         .map(|spanned| spanned.inner)
 }
 
@@ -154,14 +192,20 @@ fn let_syntax<'src>(
         .padded()
         .ignore_then(name())
         .padded()
+        .then(params(syntax.clone(), 0))
+        .padded()
         .then_ignore(just(":="))
         .padded()
-        .then(syntax.clone().map(Box::new))
+        .then(syntax.clone())
         .padded()
         .then_ignore(just(';'))
         .padded()
         .then(syntax.map(Box::new))
-        .map(|((name, value), body)| Syntax::Let { name, value, body })
+        .map(|(((name, params), value), body)| Syntax::Let {
+            name,
+            value: Box::new(desugar_fun_params(params, value)),
+            body,
+        })
 }
 
 fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>> + Clone {
@@ -193,10 +237,15 @@ fn def_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error
         .padded()
         .ignore_then(name())
         .padded()
+        .then(params(syntax(), 0))
+        .padded()
         .then_ignore(just(":="))
         .padded()
         .then(syntax())
-        .map(|(name, syntax)| ReplCmd::Def { name, syntax })
+        .map(|((name, params), value)| ReplCmd::Def {
+            name,
+            value: desugar_fun_params(params, value),
+        })
 }
 
 fn syntax_repl_cmd<'src>() -> impl Parser<'src, &'src str, ReplCmd<'src>, Err<Error<'src>>> + Clone

@@ -28,7 +28,7 @@ const REPL_ID: &str = "REPL";
 
 fn repl_process<'src>(input: &'src str, context: &mut Context, env: &mut Env) -> Result<'src, ()> {
     match parse::repl_cmd().parse(input).into_result()? {
-        ReplCmd::Def { name, syntax } => check_def(name, &syntax, context, env)?,
+        ReplCmd::Def { name, value } => check_def(name, &value, context, env)?,
         ReplCmd::Syntax { syntax } => {
             let (term, typ) = check_syntax(&syntax, context, env)?;
             let norm_term = normalize(&term, env);

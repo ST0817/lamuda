@@ -1,6 +1,6 @@
 use chumsky::span::Spanned;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Syntax<'src> {
     Sort {
         level: usize,
