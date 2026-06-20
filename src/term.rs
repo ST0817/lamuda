@@ -20,20 +20,20 @@ pub enum Term {
     NatType,
     Fun {
         #[ignored(PartialEq)]
-        param_name: Rc<String>,
+        param_name: String,
         param_type: Rc<Self>,
         body: Rc<Self>,
     },
     Prod {
         #[ignored(PartialEq)]
-        param_name: Rc<String>,
+        param_name: String,
         param_type: Rc<Self>,
         body_type: Rc<Self>,
     },
     Var {
         index: usize,
         #[ignored(PartialEq)]
-        name: Rc<String>,
+        name: String,
     },
     App {
         callee: Rc<Self>,
@@ -41,9 +41,12 @@ pub enum Term {
     },
     Let {
         #[ignored(PartialEq)]
-        name: Rc<String>,
+        name: String,
         value: Rc<Self>,
         body: Rc<Self>,
+    },
+    Const {
+        name: String,
     },
 }
 
@@ -88,6 +91,7 @@ impl Display for Term {
                 }
             }
             Self::Let { name, value, body } => write!(f, "let {name} := {value}; {body}"),
+            Self::Const { name } => write!(f, "{name}"),
         }
     }
 }

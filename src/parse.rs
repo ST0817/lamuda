@@ -237,7 +237,7 @@ fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>
 fn def_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone {
     keyword("def")
         .padded()
-        .ignore_then(name())
+        .ignore_then(name().spanned())
         .padded()
         .then(params(syntax(), 0))
         .padded()
@@ -252,26 +252,34 @@ fn def_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<
 
 fn inductive_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone
 {
+    let params = param(syntax())
+        .spanned()
+        .padded()
+        .repeated()
+        .collect::<Vec<_>>();
+    let ctors = just('|')
+        .padded()
+        .ignore_then(name().spanned())
+        .padded()
+        .repeated()
+        .collect();
     keyword("inductive")
         .padded()
-        .ignore_then(name())
+        .ignore_then(name().spanned())
         .padded()
-        .then(
-            param(syntax())
-                .spanned()
-                .padded()
-                .repeated()
-                .collect::<Vec<_>>(),
-        )
+        .then(params)
         .padded()
         .then_ignore(just(':'))
         .padded()
         .then(syntax().spanned())
-        .map(|((name, params), typ)| Command::Inductive {
+        .padded()
+        .then(ctors)
+        .map(|(((name, params), typ), ctors)| Command::Inductive {
             name,
             typ: params
                 .into_iter()
                 .rfold(typ, |typ, param| desugar_prod_param(param, typ)),
+            ctors,
         })
 }
 

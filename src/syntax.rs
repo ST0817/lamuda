@@ -37,11 +37,12 @@ pub enum Syntax<'src> {
 
 pub enum Command<'src> {
     Def {
-        name: &'src str,
+        name: Spanned<&'src str>,
         value: Syntax<'src>,
     },
     Inductive {
-        name: &'src str,
+        name: Spanned<&'src str>,
         typ: Spanned<Syntax<'src>>,
+        ctors: Vec<Spanned<&'src str>>,
     },
 }
