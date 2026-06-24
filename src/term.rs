@@ -5,8 +5,6 @@ use std::{
 
 use ignorable::PartialEq;
 
-use crate::env::Env;
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
     Sort {
@@ -64,7 +62,7 @@ impl Display for Term {
                 param_name,
                 param_type,
                 body,
-            } => write!(f, "fun {param_name} : {param_type} => {body}"),
+            } => write!(f, "fun ({param_name} : {param_type}) => {body}"),
             Self::Prod {
                 param_name,
                 param_type,
@@ -83,6 +81,9 @@ impl Display for Term {
             Self::App { callee, arg } => {
                 match callee.as_ref() {
                     Self::Fun { .. } => write!(f, "({callee}) ")?,
+                    Self::App { callee, arg } if let Term::Fun { .. } = arg.as_ref() => {
+                        write!(f, "{callee} ({arg}) ")?
+                    }
                     _ => write!(f, "{callee} ")?,
                 }
                 match arg.as_ref() {
@@ -128,56 +129,16 @@ pub fn shift(term: &Rc<Term>, value: isize, cutoff: usize) -> Rc<Term> {
     }
 }
 
-pub fn normalize(term: &Rc<Term>, env: &Env) -> Rc<Term> {
-    match term.as_ref() {
-        Term::Var { index, .. } if let Some(value) = &env[*index] => {
-            shift(value, *index as isize + 1, 0)
-        }
-        Term::Fun {
-            param_name,
-            param_type,
-            body,
-        } => {
-            let norm_param_type = normalize(param_type, env);
-            let new_env = env.extend(None);
-            Rc::new(Term::Fun {
-                param_name: param_name.clone(),
-                param_type: norm_param_type,
-                body: normalize(body, &new_env),
-            })
-        }
-        Term::Prod {
-            param_name,
-            param_type,
-            body_type,
-        } => {
-            let norm_param_type = normalize(param_type, env);
-            let new_env = env.extend(None);
-            Rc::new(Term::Prod {
-                param_name: param_name.clone(),
-                param_type: norm_param_type,
-                body_type: normalize(body_type, &new_env),
-            })
-        }
-        Term::App { callee, arg } => {
-            let norm_callee = normalize(callee, env);
-            let norm_arg = normalize(arg, env);
-            match norm_callee.as_ref() {
-                Term::Fun { body, .. } => {
-                    let new_env = env.extend(Some(norm_arg));
-                    shift(&normalize(body, &new_env), -1, 0)
-                }
-                _ => Rc::new(Term::App {
-                    callee: norm_callee.clone(),
-                    arg: norm_arg,
-                }),
-            }
-        }
-        Term::Let { value, body, .. } => {
-            let norm_value = normalize(value, env);
-            let new_env = env.extend(Some(norm_value));
-            normalize(body, &new_env)
-        }
-        _ => term.clone(),
+pub fn spine(term: &Rc<Term>) -> (Rc<Term>, Vec<Rc<Term>>) {
+    let mut callee_result = term.clone();
+    let mut args = Vec::new();
+    loop {
+        let callee_result_tmp = callee_result.clone();
+        let Term::App { callee, arg } = callee_result_tmp.as_ref() else {
+            args.reverse();
+            return (callee_result, args);
+        };
+        callee_result = callee.clone();
+        args.push(arg.clone());
     }
 }

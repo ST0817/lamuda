@@ -12,7 +12,7 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-use crate::{check::Checker, context::LocalContext, env::Env, repl_cmd::ReplCmd, term::normalize};
+use crate::{check::Checker, context::LocalContext, env::Env, repl_cmd::ReplCmd};
 
 pub type Error<'src> = Rich<'src, char>;
 pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
@@ -30,7 +30,7 @@ fn repl_process<'src>(
         ReplCmd::Command { command } => checker.check_command(&command, local_context, env)?,
         ReplCmd::Syntax { syntax } => {
             let (term, typ) = checker.check_syntax(&syntax, local_context, env)?;
-            let norm_term = normalize(&term, env);
+            let norm_term = checker.normalize(&term, env);
             println!("{norm_term}");
             println!(": {typ}");
         }

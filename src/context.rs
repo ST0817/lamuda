@@ -3,9 +3,22 @@ use std::{collections::HashMap, rc::Rc};
 use crate::term::Term;
 
 #[derive(Debug)]
+pub struct RecRule {
+    pub ctors: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum ConstValue {
+    Def { value: Rc<Term> },
+    Ind,
+    Ctor,
+    Rec { rule: RecRule },
+}
+
+#[derive(Debug)]
 pub struct Const {
     pub typ: Rc<Term>,
-    pub value: Option<Rc<Term>>,
+    pub value: ConstValue,
 }
 
 #[derive(Debug)]
