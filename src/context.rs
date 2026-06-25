@@ -2,12 +2,12 @@ use std::{collections::HashMap, rc::Rc};
 
 use crate::term::Term;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RecRule {
     pub ctors: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConstValue {
     Def { value: Rc<Term> },
     Ind,
@@ -15,13 +15,13 @@ pub enum ConstValue {
     Rec { rule: RecRule },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Const {
     pub typ: Rc<Term>,
     pub value: ConstValue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GlobalContext {
     consts: HashMap<String, Const>,
 }

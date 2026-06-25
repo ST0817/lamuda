@@ -35,6 +35,13 @@ pub enum Syntax<'src> {
     },
 }
 
+#[derive(Debug)]
+pub struct Ctor<'src> {
+    pub name: Spanned<&'src str>,
+    pub typ: Spanned<Syntax<'src>>,
+}
+
+#[derive(Debug)]
 pub enum Command<'src> {
     Def {
         name: Spanned<&'src str>,
@@ -43,6 +50,6 @@ pub enum Command<'src> {
     Inductive {
         name: Spanned<&'src str>,
         typ: Spanned<Syntax<'src>>,
-        ctors: Vec<Spanned<&'src str>>,
+        ctors: Vec<Ctor<'src>>,
     },
 }

@@ -9,7 +9,7 @@ use chumsky::{
 use crate::{
     Error,
     repl_cmd::ReplCmd,
-    syntax::{Command, Syntax},
+    syntax::{Command, Ctor, Syntax},
 };
 
 fn parens<'src, T>(
@@ -234,6 +234,8 @@ fn syntax<'src>() -> impl Parser<'src, &'src str, Syntax<'src>, Err<Error<'src>>
     syntax
 }
 
+// Command
+
 fn def_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone {
     keyword("def")
         .padded()
@@ -250,6 +252,17 @@ fn def_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<
         })
 }
 
+fn ctor<'src>() -> impl Parser<'src, &'src str, Ctor<'src>, Err<Error<'src>>> + Clone {
+    just('|')
+        .padded()
+        .ignore_then(name().spanned())
+        .padded()
+        .then_ignore(just(':'))
+        .padded()
+        .then(syntax().spanned())
+        .map(|(name, typ)| Ctor { name, typ })
+}
+
 fn inductive_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<Error<'src>>> + Clone
 {
     let params = param(syntax())
@@ -257,12 +270,6 @@ fn inductive_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<
         .padded()
         .repeated()
         .collect::<Vec<_>>();
-    let ctors = just('|')
-        .padded()
-        .ignore_then(name().spanned())
-        .padded()
-        .repeated()
-        .collect();
     keyword("inductive")
         .padded()
         .ignore_then(name().spanned())
@@ -273,7 +280,7 @@ fn inductive_command<'src>() -> impl Parser<'src, &'src str, Command<'src>, Err<
         .padded()
         .then(syntax().spanned())
         .padded()
-        .then(ctors)
+        .then(ctor().repeated().collect())
         .map(|(((name, params), typ), ctors)| Command::Inductive {
             name,
             typ: params

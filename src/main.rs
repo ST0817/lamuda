@@ -12,7 +12,12 @@ use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-use crate::{check::Checker, context::LocalContext, env::Env, repl_cmd::ReplCmd};
+use crate::{
+    check::{check_command, check_syntax, normalize},
+    context::{GlobalContext, LocalContext},
+    env::Env,
+    repl_cmd::ReplCmd,
+};
 
 pub type Error<'src> = Rich<'src, char>;
 pub type Result<'src, T> = std::result::Result<T, Vec<Error<'src>>>;
@@ -22,20 +27,20 @@ const REPL_ID: &str = "REPL";
 
 fn repl_process<'src>(
     input: &'src str,
-    checker: &mut Checker,
+    global_context: &GlobalContext,
     local_context: &mut LocalContext,
     env: &mut Env,
-) -> Result<'src, ()> {
+) -> Result<'src, GlobalContext> {
     match parse::repl_cmd().parse(input).into_result()? {
-        ReplCmd::Command { command } => checker.check_command(&command, local_context, env)?,
+        ReplCmd::Command { command } => check_command(&command, global_context, local_context, env),
         ReplCmd::Syntax { syntax } => {
-            let (term, typ) = checker.check_syntax(&syntax, local_context, env)?;
-            let norm_term = checker.normalize(&term, env);
+            let (term, typ) = check_syntax(&syntax, global_context, local_context, env)?;
+            let norm_term = normalize(&term, global_context, env);
             println!("{norm_term}");
             println!(": {typ}");
+            Ok(global_context.clone())
         }
     }
-    Ok(())
 }
 
 fn report_errors<'src>(errors: &Vec<Error<'src>>, id: &str, src: &'src str) {
@@ -61,7 +66,7 @@ fn main() -> ExitCode {
         println!("no previous history")
     }
 
-    let mut checker = Checker::new();
+    let mut global_context = GlobalContext::new();
     let mut local_context = LocalContext::new();
     let mut env = Env::new();
 
@@ -71,10 +76,9 @@ fn main() -> ExitCode {
             Ok(input) => {
                 editor.add_history_entry(&input).unwrap();
 
-                if let Err(errors) =
-                    repl_process(&input, &mut checker, &mut local_context, &mut env)
-                {
-                    report_errors(&errors, REPL_ID, &input);
+                match repl_process(&input, &global_context, &mut local_context, &mut env) {
+                    Ok(new_global_context) => global_context = new_global_context,
+                    Err(errors) => report_errors(&errors, REPL_ID, &input),
                 }
 
                 editor.append_history(HISTORY_FILE_NAME).unwrap();
