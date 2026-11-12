@@ -1,9 +1,11 @@
 [package]
 name = "lamuda"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+ariadne = "0.6.0"
+chumsky = "0.13.0"
 dirs = "7.0.0"
 rustyline = "19.0.0"
